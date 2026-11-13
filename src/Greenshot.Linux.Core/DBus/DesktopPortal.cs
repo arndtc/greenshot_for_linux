@@ -74,6 +74,67 @@ public sealed class DesktopPortal : IDisposable
     }
 
     /// <summary>
+    /// Associate this D-Bus connection with <paramref name="appId"/> via org.freedesktop.host.portal.Registry
+    /// (xdg-desktop-portal ≥ 1.20). Host apps must do this before any other portal call; from 1.21 GlobalShortcuts
+    /// rejects CreateSession with NotAllowed "An app id is required" otherwise. Sandboxed apps (Flatpak/Snap) already
+    /// have an id and skip. Missing Registry on older portals is ignored.
+    /// </summary>
+    public async Task RegisterHostAppAsync(string appId)
+    {
+        if (string.IsNullOrWhiteSpace(appId) || IsSandboxed())
+        {
+            return;
+        }
+
+        // MessageWriter is a ref struct: same pattern as CreateCall (no using var — WriteOptions needs ref)
+        var writer = Connection.GetMessageWriter();
+        MessageBuffer message;
+        try
+        {
+            writer.WriteMethodCallHeader(destination: BusName, path: ObjectPath, @interface: "org.freedesktop.host.portal.Registry",
+                member: "Register", signature: "sa{sv}");
+            writer.WriteString(appId);
+            writer.WriteOptions([]);
+            message = writer.CreateMessage();
+        }
+        finally
+        {
+            writer.Dispose();
+        }
+
+        try
+        {
+            await Connection.CallMethodAsync(message).ConfigureAwait(false);
+            Log.Info($"Registered host app id '{appId}' with the desktop portal");
+        }
+        catch (DBusExceptionBase ex) when (IsMissingRegistry(ex))
+        {
+            Log.Debug($"Host portal Registry is not available: {ex.Message}");
+        }
+        catch (DBusExceptionBase ex)
+        {
+            Log.Warn($"Registering host app id '{appId}' with the desktop portal failed: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Flatpak and Snap set the portal app id; Registry.Register is for unsandboxed host apps only.
+    /// </summary>
+    private static bool IsSandboxed() =>
+        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FLATPAK_ID"))
+        || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SNAP_NAME"))
+        || File.Exists("/.flatpak-info");
+
+    private static bool IsMissingRegistry(DBusExceptionBase ex)
+    {
+        // Older portals (< 1.20) have no Registry; treat that as optional, not a hard failure.
+        var message = ex.Message;
+        return message.Contains("UnknownMethod", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("UnknownInterface", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("UnknownObject", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// The version of a portal interface, null when the portal doesn't offer it
     /// </summary>
     public async Task<uint?> GetVersionAsync(string portalInterface)

@@ -412,6 +412,8 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
         try
         {
             _portal = await DesktopPortal.ConnectAsync();
+            // Before any other portal call: host apps need an app id (GlobalShortcuts on portal ≥ 1.21)
+            await _portal.RegisterHostAppAsync(AppIdentity.Id);
             _notifications = new DesktopNotifications(_portal.Connection);
             await _notifications.StartAsync();
         }

@@ -137,7 +137,10 @@ public sealed class GlobalShortcutsPortal : IDisposable
                     var entry = properties.GetDictionaryEntry(p);
                     if (entry.Key.GetString() == "trigger_description")
                     {
-                        trigger = entry.Value.GetVariantValue().GetString();
+                        // Some portals nest the value as a variant; others (GNOME) already unwrap to string
+                        trigger = entry.Value.Type == VariantValueType.Variant
+                            ? entry.Value.GetVariantValue().GetString()
+                            : entry.Value.GetString();
                     }
                 }
 
