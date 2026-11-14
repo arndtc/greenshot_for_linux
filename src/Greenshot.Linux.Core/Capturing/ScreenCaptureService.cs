@@ -38,7 +38,8 @@ public sealed class ScreenCaptureService(CoreSettings settings, ICompositor comp
     public IScreenGrabber Grabber => grabber;
 
     /// <summary>
-    /// Pick the grabber for CaptureBackend: Grim, Portal or Auto (grim when it works, else the portal)
+    /// Pick the grabber for CaptureBackend: Grim, Portal, X11 or Auto (session-aware).
+    /// Wayland: grim when it works, else the portal. X11: XGetImage, with portal/grim as fallbacks when configured Auto.
     /// </summary>
     public static async Task<IScreenGrabber> CreateGrabberAsync(CoreSettings settings, DesktopPortal? portal,
         IPortalParentProvider? portalParent = null)
@@ -48,24 +49,40 @@ public sealed class ScreenCaptureService(CoreSettings settings, ICompositor comp
             ? new PortalScreenGrabber(portal, portalParent)
             : null;
         IScreenGrabber? grimGrabber = GrimScreenGrabber.IsAvailable ? new GrimScreenGrabber() : null;
+        IScreenGrabber? x11Grabber = X11ScreenGrabber.IsAvailable ? new X11ScreenGrabber() : null;
 
         IScreenGrabber? chosen = configured switch
         {
             "grim" => grimGrabber,
             "portal" => portalGrabber,
-            _ => grimGrabber != null && portalGrabber != null
-                ? new FallbackScreenGrabber(grimGrabber, portalGrabber)
-                : grimGrabber ?? portalGrabber,
+            "x11" => x11Grabber,
+            _ => ChooseAuto(grimGrabber, portalGrabber, x11Grabber),
         };
 
         return chosen ?? throw new CaptureException(UnavailableMessage);
     }
 
+    private static IScreenGrabber? ChooseAuto(IScreenGrabber? grim, IScreenGrabber? portal, IScreenGrabber? x11)
+    {
+        if (SessionEnvironment.IsX11)
+        {
+            // Prefer native X11 capture on X11 sessions (no grim / portal required)
+            return x11 ?? portal ?? grim;
+        }
+
+        if (grim != null && portal != null)
+        {
+            return new FallbackScreenGrabber(grim, portal);
+        }
+
+        return grim ?? portal ?? x11;
+    }
+
     /// <summary>
-    /// Message when neither grim nor a Screenshot portal backend is available (CLI stderr / notifications).
+    /// Message when no screen grabber backend is available (CLI stderr / notifications).
     /// </summary>
     public const string UnavailableMessage =
-        "Greenshot can't capture the screen: install grim (wlroots compositors) or xdg-desktop-portal with a backend for your desktop";
+        "Greenshot can't capture the screen: install grim (wlroots compositors), use an X11 session (XGetImage), or xdg-desktop-portal with a backend for your desktop";
 
     public async Task<ScreenLayout> GetLayoutAsync() => await compositor.GetLayoutAsync().ConfigureAwait(false) ?? uiLayout();
 

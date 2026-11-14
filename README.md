@@ -1,11 +1,11 @@
-# Greenshot for Linux (Wayland)
+# Greenshot for Linux (Wayland and X11)
 
-A Linux version of [Greenshot](https://getgreenshot.org/), built for Wayland desktops. This repository only has the Linux
-version; the Windows version is in [greenshot/greenshot](https://github.com/greenshot/greenshot). It uses WPF, WinForms,
-GDI+ and Win32, none of which exist on Linux, so this is a separate application which reads the same settings, language
-packs, `.greenshot` files and recipes. The UI is
+A Linux version of [Greenshot](https://getgreenshot.org/), built for Wayland desktops and X11 sessions (including XFCE).
+This repository only has the Linux version; the Windows version is in [greenshot/greenshot](https://github.com/greenshot/greenshot).
+It uses WPF, WinForms, GDI+ and Win32, none of which exist on Linux, so this is a separate application which reads the
+same settings, language packs, `.greenshot` files and recipes. The UI is
 [Avalonia](https://avaloniaui.net/), images are handled with SkiaSharp, and the screen is captured through the
-compositor or the xdg-desktop-portal.
+compositor, the xdg-desktop-portal, or X11 `XGetImage`.
 
 The goal is every feature of Greenshot 1.4 that Wayland allows, with the closest equivalent for the ones it doesn't.
 It is an independent project, not made by the Greenshot team, with its own version numbers (starting at 0.1.0); it reads
@@ -20,9 +20,9 @@ What is done and what isn't possible on Linux is in the [Roadmap](#roadmap).
 | Capture region, with frozen screen, crosshair, zoomer, size label, keys (F1) and info (I) panels | ✅ |
 | Capture full screen (all monitors) | ✅ |
 | Capture last region | ✅ |
-| Capture window: hover or Tab to pick, or click a window in region mode | ✅ Sway, Hyprland |
-| Capture active window | ✅ Sway, Hyprland |
-| Mouse pointer in the capture (`CaptureMousepointer`) | ✅ with grim |
+| Capture window: hover or Tab to pick, or click a window in region mode | ✅ Sway, Hyprland, X11 (XFCE) |
+| Capture active window | ✅ Sway, Hyprland, X11 |
+| Mouse pointer in the capture (`CaptureMousepointer`) | ✅ with grim (X11 grabber: not yet) |
 | Destinations: Open in image editor, Save, Save as… (desktop file dialog), Copy to clipboard, Picker | ✅ |
 | Destinations: Printer (print dialog of the desktop, the print options of Windows), E-Mail (mail program with the capture attached) | ✅ Print / Email portal, else `lp` / `xdg-email` |
 | Destinations: copy the text (OCR), copy the text of QR codes and barcodes (the link opens from the notification) | ✅ OCR needs tesseract |
@@ -31,9 +31,10 @@ What is done and what isn't possible on Linux is in the [Roadmap](#roadmap).
 | Fixed size: `F` on the capture screen, an area of a chosen size follows the cursor (1-9 and PageUp/PageDown pick the size, C the corner the cursor holds, Alt places it without snapping); the sizes are `FixedCaptureSizes` and the last region captures | ✅ |
 | Filename patterns (`${capturetime}`, `${title}`, `${NUM}`, `${YYYY}`, padding, substrings, …) | ✅ same as Windows |
 | Notifications with thumbnail; click opens the file | ✅ |
-| Tray icon and menu | ✅ (StatusNotifierItem) |
+| Tray icon and menu | ✅ (StatusNotifierItem; XFCE needs the panel Status Notifier / Indicator plugin) |
 | Command line, single instance: `greenshot capture region` etc., and the options of greenshot-cli (`-l`, `-i`, `-r`, see [Command line](#command-line)) | ✅ |
 | Global hotkeys via the GlobalShortcuts portal | ✅ KDE, GNOME 48+, Hyprland |
+| Global hotkeys on X11 (XGrabKey) / XFCE xfconf | ✅ when the portal is missing |
 | `greenshot.ini` in the Windows format, unknown keys are kept | ✅ |
 | Settings window: language, theme, autostart, notifications, hotkeys, capture, output, destinations, editor | ✅ |
 | Welcome window at the first start, with a check of what the desktop offers (capturing, clipboard, tray, notifications, hotkeys) | ✅ |
@@ -113,15 +114,20 @@ shows them, they start with a PNG. The elements of Windows files (BinaryFormatte
 - .NET 10 SDK (to build)
 - One way to capture the screen:
   - `grim` on wlroots compositors (Sway, Hyprland, river, Wayfire, …), the fastest and includes the mouse pointer, or
-  - `xdg-desktop-portal` with a backend for the desktop (GNOME, KDE, wlr), used automatically when grim can't capture
-- `wl-clipboard` (`wl-copy`) for the clipboard
+  - `xdg-desktop-portal` with a backend for the desktop (GNOME, KDE, wlr), used automatically when grim can't capture, or
+  - **X11** sessions: built-in `XGetImage` grabber (no grim/portal required; set `CaptureBackend=X11` to force it)
+- Clipboard: `wl-clipboard` (`wl-copy`) on Wayland, or `xclip` on X11
 - `tesseract` and its language packs for OCR, capturing text and redacting text (optional),
   Fedora: `sudo dnf install tesseract tesseract-langpack-eng tesseract-langpack-deu`
 - A notification daemon (mako, dunst, GNOME, KDE) for notifications
-- A tray that supports StatusNotifierItem (KDE, Waybar, the AppIndicator extension on GNOME)
-- XWayland (Avalonia renders through it)
+- A tray that supports StatusNotifierItem (KDE, Waybar, the AppIndicator extension on GNOME; on XFCE enable the
+  **Status Notifier Plugin** — Avalonia does not use classic XEmbed tray icons)
+- XWayland on Wayland sessions (Avalonia often renders through it); pure X11 needs `libX11`
 
 Fedora: `sudo dnf install dotnet-sdk-10.0 grim wl-clipboard xdg-desktop-portal`
+
+XFCE / X11 walkthrough (build, hotkeys, headless `xdotool`): see the project doc for this workstream when published
+alongside the PR, or the Hotkeys section below.
 
 ### Recipes
 
@@ -225,10 +231,15 @@ authoring tools (`get_recipe_catalog`, `validate_recipe`, `propose_recipe`, `upd
 
 ## Hotkeys
 
-Wayland doesn't let an application grab keys. Greenshot uses the GlobalShortcuts portal where the desktop offers it
+**Wayland:** applications can't grab keys. Greenshot uses the GlobalShortcuts portal where the desktop offers it
 (KDE Plasma, GNOME 48+, Hyprland); the desktop asks you to confirm the keys at the first start.
-
 Elsewhere bind the commands in the compositor. They talk to the running Greenshot, which starts if it doesn't run yet.
+
+**X11 (no GlobalShortcuts portal):** Greenshot registers Print / Alt+Print / Ctrl+Print / Shift+Print with `XGrabKey`
+on the root window (including NumLock/CapsLock variants). On **XFCE**, Greenshot also detects conflicts with
+`xfce4-screenshooter` via `xfconf-query` on `xfce4-keyboard-shortcuts` and logs them clearly. To let Greenshot claim
+those keys for `greenshot capture …`, set `XfceSetShortcuts=True` in `greenshot.ini` or
+`GREENSHOT_XFCE_SET_SHORTCUTS=1` before start.
 
 Sway (`~/.config/sway/config`):
 
@@ -250,6 +261,18 @@ bind = SHIFT, Print, exec, greenshot capture last
 exec-once = greenshot
 ```
 
+XFCE (optional; same effect as `XfceSetShortcuts`):
+
+```
+xfconf-query -c xfce4-keyboard-shortcuts -p /commands/custom/Print -n -t string -s "greenshot capture region"
+xfconf-query -c xfce4-keyboard-shortcuts -p /commands/custom/'<Alt>Print' -n -t string -s "greenshot capture activewindow"
+xfconf-query -c xfce4-keyboard-shortcuts -p /commands/custom/'<Primary>Print' -n -t string -s "greenshot capture fullscreen"
+xfconf-query -c xfce4-keyboard-shortcuts -p /commands/custom/'<Shift>Print' -n -t string -s "greenshot capture last"
+```
+
+Headless key simulation for tests (Xvfb + XFCE): `xdotool key --clearmodifiers Print` (and
+`alt+Print`, `ctrl+Print`, `shift+Print`).
+
 ## Settings
 
 The tray menu has *Preferences…*, `greenshot settings` opens them too. They are stored in
@@ -257,7 +280,7 @@ The tray menu has *Preferences…*, `greenshot settings` opens them too. They ar
 The settings used so far: `OutputDestinations` (`Picker`, `FileDefault`, `FileWithDialog`, `Clipboard`), `OutputFilePath`,
 `OutputFileFilenamePattern`, `OutputFileFormat` (`png`, `jpg`, `webp`), `OutputFileJpegQuality`, `OutputFileAllowOverwrite`,
 `OutputFileCopyPathToClipboard`, `CaptureMousepointer`, `CaptureDelay`, `PlayCameraSound`, `ShowTrayNotification`,
-the four hotkeys, and the Linux only `CaptureBackend` (`Auto`, `Grim`, `Portal`).
+the four hotkeys, and the Linux only `CaptureBackend` (`Auto`, `Grim`, `Portal`, `X11`) and `XfceSetShortcuts`.
 
 The log is `~/.local/state/greenshot/greenshot.log`; `GREENSHOT_DEBUG=1` adds details.
 
@@ -280,9 +303,9 @@ like `wpf:Text` on Windows.
 |---|---|---|
 | One capture window over all monitors | One per monitor, sharing the selection | Wayland places each window on one output |
 | The crosshair is at the mouse at once | It appears when the mouse or an arrow key moves | Applications can't ask where the pointer is |
-| Window capture everywhere | Sway and Hyprland pick the window on the capture screen; GNOME and KDE in the desktop's own screenshot dialog (Screenshot portal) | Applications can't list other windows |
-| Hotkeys always | GlobalShortcuts portal or compositor bindings | Applications can't grab keys |
-| Capture a window behind others | Only what is visible | The compositor only gives the composed screen |
+| Window capture everywhere | Sway and Hyprland pick the window on the capture screen; X11 lists windows via EWMH; GNOME and KDE Wayland use the desktop's screenshot dialog (Screenshot portal) | Wayland apps can't list other windows; X11 can |
+| Hotkeys always | GlobalShortcuts portal, X11 `XGrabKey` / XFCE xfconf, or compositor bindings | Wayland apps can't grab keys; X11 can |
+| Capture a window behind others | Only what is visible on Wayland; X11 `XGetImage` of a window still sees that window's buffer when not obscured the same way | Wayland compositors only give the composed screen |
 
 ## Code
 
@@ -322,6 +345,7 @@ like `wpf:Text` on Windows.
 6. **Recipes**: the engine, steps, triggers, approval, options and quick preferences ✅; the recipe manager and the visual
    editor ✅; the command line ✅; the MCP server for AI tools ✅
 7. **Window capture on GNOME and KDE** (the desktop's screenshot dialog) ✅, fixed size capture ✅
-8. **Packaging**: RPM ✅, AUR and Flatpak written, not tested yet
+8. **X11 / XFCE**: capture (`XGetImage`), global hotkeys (`XGrabKey` + optional xfconf), window list ✅
+9. **Packaging**: RPM ✅, AUR and Flatpak written, not tested yet
 
 Not possible on Linux: the Office plugin (COM automation of Microsoft Office). LibreOffice could take its place.

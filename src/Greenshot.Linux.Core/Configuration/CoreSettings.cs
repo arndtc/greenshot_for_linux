@@ -412,12 +412,22 @@ public sealed class CoreSettings
     }
 
     /// <summary>
-    /// Linux only: which screen grabber to use, Auto, Grim or Portal
+    /// Linux only: which screen grabber to use, Auto, Grim, Portal or X11
     /// </summary>
     public string CaptureBackend
     {
         get => GetString(nameof(CaptureBackend), "Auto");
         set => SetString(nameof(CaptureBackend), value);
+    }
+
+    /// <summary>
+    /// Linux / XFCE: when true (or GREENSHOT_XFCE_SET_SHORTCUTS=1), claim Print-family keys in
+    /// xfce4-keyboard-shortcuts for <c>greenshot capture …</c> (overrides xfce4-screenshooter when it owns them).
+    /// </summary>
+    public bool XfceSetShortcuts
+    {
+        get => GetBool(nameof(XfceSetShortcuts), false);
+        set => SetBool(nameof(XfceSetShortcuts), value);
     }
 
     public bool ZoomerEnabled
