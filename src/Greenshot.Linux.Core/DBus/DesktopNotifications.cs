@@ -122,7 +122,8 @@ public sealed class DesktopNotifications : IDisposable
             || ex.Message.Contains("was not provided by any .service files", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// org.freedesktop.portal.Notification.AddNotification — no click actions (portal default-action needs a separate handler).
+    /// org.freedesktop.portal.Notification.AddNotification(IN s id, IN a{sv} notification) — signature <c>sa{sv}</c>.
+    /// No click actions (portal default-action needs a separate handler).
     /// </summary>
     private async Task ShowViaPortalAsync(string summary, string body, NotificationSeverity severity, string? imagePath)
     {
@@ -131,8 +132,7 @@ public sealed class DesktopNotifications : IDisposable
         try
         {
             writer.WriteMethodCallHeader(destination: DesktopPortal.BusName, path: DesktopPortal.ObjectPath,
-                @interface: "org.freedesktop.portal.Notification", member: "AddNotification", signature: "ssa{sv}");
-            writer.WriteString(AppIdentity.Id);
+                @interface: "org.freedesktop.portal.Notification", member: "AddNotification", signature: "sa{sv}");
             writer.WriteString("greenshot-" + Guid.NewGuid().ToString("N")[..12]);
             // Portal icon is a nested variant; skip file thumbnails here (title/body still show).
             _ = imagePath;

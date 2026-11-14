@@ -302,6 +302,8 @@ internal sealed class SettingsWindow : Window
         _apply.Add(() => _settings.ZxingScanOnCapture = scanQr.IsChecked == true);
         var interactive = Ui.Check(Texts.Settings("capture_windows_interactive"), _settings.CaptureWindowsInteractive);
         _apply.Add(() => _settings.CaptureWindowsInteractive = interactive.IsChecked == true);
+        var decorations = Ui.Check(Texts.Linux("capture_window_decorations"), _settings.CaptureWindowDecorations);
+        _apply.Add(() => _settings.CaptureWindowDecorations = decorations.IsChecked == true);
 
         string[] backends = ["Auto", "Grim", "Portal", "X11"];
         var backend = new ComboBox
@@ -329,7 +331,7 @@ internal sealed class SettingsWindow : Window
                 zoomer,
                 scanQr,
                 Ui.Row(Texts.Settings("waittime"), delay)),
-            Ui.Section(Texts.Settings("windowscapture"), interactive),
+            Ui.Section(Texts.Settings("windowscapture"), interactive, decorations, Ui.Note(Texts.Linux("capture_window_decorations_hint"))),
             Ui.Section(Texts.Linux("capture_backend"), backend, Ui.Note(Texts.Linux("capture_backend_restart"))),
             Ui.Section(Texts.Settings("ocr"), Ui.Row(Texts.Linux("ocr_languages"), ocrLanguages), installed));
     }

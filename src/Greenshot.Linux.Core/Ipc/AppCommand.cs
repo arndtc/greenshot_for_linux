@@ -79,8 +79,8 @@ public sealed record AppCommand(AppCommandKind Kind, CaptureMode? Mode = null, s
 
         Commands:
           capture region        Select a region and capture it (PrintScreen)
-          capture window        Select a window and capture it (Sway and Hyprland)
-          capture activewindow  Capture the active window (Alt + PrintScreen, Sway and Hyprland)
+          capture window        Select a window and capture it (Sway, Hyprland, X11)
+          capture activewindow  Capture the active window (Alt + PrintScreen; Sway, Hyprland, X11)
           capture fullscreen    Capture all screens (Ctrl + PrintScreen)
           capture last          Capture the last region again (Shift + PrintScreen)
           open <file>           Open an image or .greenshot file in the editor, also: greenshot <file>
@@ -109,7 +109,8 @@ public sealed record AppCommand(AppCommandKind Kind, CaptureMode? Mode = null, s
           greenshot:<link>      A Greenshot link: greenshot:settings, greenshot://recipe/<id>?key=value, ...
 
         Wayland doesn't let applications grab keys. Desktops with the GlobalShortcuts portal (KDE, GNOME 48+, Hyprland)
-        ask you to confirm Greenshot's keys at the first start. Elsewhere bind the commands in the compositor, e.g. for Sway:
+        ask you to confirm Greenshot's keys at the first start. On X11, Greenshot grabs Print-family keys itself (and on
+        XFCE can set xfce4-keyboard-shortcuts). Elsewhere bind the commands in the compositor, e.g. for Sway:
           bindsym Print exec greenshot capture region
         """;
 

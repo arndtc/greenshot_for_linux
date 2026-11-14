@@ -21,7 +21,9 @@
 
 using Greenshot.Linux.Core;
 using Greenshot.Linux.Core.Capturing;
+using Greenshot.Linux.Core.Compositor;
 using Greenshot.Linux.Core.Hotkeys;
+using Greenshot.Linux.Core.Ipc;
 using Greenshot.Linux.Core.X11;
 
 namespace Greenshot.Linux.Tests.X11;
@@ -162,6 +164,63 @@ public class ScreenCaptureGrabberSelectionTests
     public void UnavailableMessage_mentions_x11()
     {
         Assert.Contains("X11", ScreenCaptureService.UnavailableMessage, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+public class X11FrameExtentsTests
+{
+    [Fact]
+    public void ExpandWithFrameExtents_matches_xfce_example()
+    {
+        // Client 817×485 at (205,179); extents 5,5,29,5 → framed 827×519 at (200,150)
+        var client = new LayoutRect(205, 179, 817, 485);
+        var screen = new LayoutRect(0, 0, 1920, 1200);
+        var framed = X11Compositor.ExpandWithFrameExtents(client, left: 5, right: 5, top: 29, bottom: 5, screen);
+        Assert.Equal(200, framed.X);
+        Assert.Equal(150, framed.Y);
+        Assert.Equal(827, framed.Width);
+        Assert.Equal(519, framed.Height);
+    }
+
+    [Fact]
+    public void ExpandWithFrameExtents_clips_to_screen()
+    {
+        var client = new LayoutRect(2, 2, 100, 100);
+        var screen = new LayoutRect(0, 0, 1920, 1200);
+        var framed = X11Compositor.ExpandWithFrameExtents(client, left: 10, right: 10, top: 30, bottom: 10, screen);
+        Assert.Equal(0, framed.X);
+        Assert.Equal(0, framed.Y);
+        Assert.True(framed.Width <= 1920);
+        Assert.True(framed.Height <= 1200);
+    }
+}
+
+public class CaptureTitleTests
+{
+    [Theory]
+    [InlineData("My window", "My window")]
+    [InlineData("My window - Greenshot image editor", "My window")]
+    [InlineData("My window - Greenshot image editor - Greenshot image editor", "My window")]
+    [InlineData("*My window - Greenshot image editor", "My window")]
+    [InlineData("", "")]
+    public void StripEditorWindowSuffix(string input, string expected) =>
+        Assert.Equal(expected, CaptureTitle.StripEditorWindowSuffix(input));
+
+    [Fact]
+    public void CaptureDetails_Title_strips_editor_suffix()
+    {
+        var details = new CaptureDetails { Title = "Shot - Greenshot image editor - Greenshot image editor" };
+        Assert.Equal("Shot", details.Title);
+    }
+}
+
+public class AppCommandHelpTests
+{
+    [Fact]
+    public void Usage_mentions_x11_for_window_capture()
+    {
+        Assert.Contains("X11", AppCommand.Usage, StringComparison.Ordinal);
+        Assert.DoesNotContain("capture window        Select a window and capture it (Sway and Hyprland)", AppCommand.Usage);
     }
 }
 

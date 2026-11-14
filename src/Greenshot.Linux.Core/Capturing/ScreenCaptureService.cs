@@ -118,7 +118,12 @@ public sealed class ScreenCaptureService(CoreSettings settings, ICompositor comp
 
         var area = snapshot.ToLayout(pixels);
         title ??= await FindTitleAsync(area).ConfigureAwait(false);
-        var details = new CaptureDetails { DateTime = snapshot.TakenAt, Title = title, Mode = mode };
+        var details = new CaptureDetails
+        {
+            DateTime = snapshot.TakenAt,
+            Title = CaptureTitle.StripEditorWindowSuffix(title),
+            Mode = mode,
+        };
         if (mode != CaptureMode.FullScreen)
         {
             settings.LastCapturedRegion = area;

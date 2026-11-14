@@ -135,9 +135,18 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
     {
         Texts.SetLanguage(_settings.Language);
         ApplyTheme();
+        ApplyX11CompositorSettings();
         if (_trayIcon != null)
         {
             _trayIcon.Menu = CreateTrayMenu();
+        }
+    }
+
+    private void ApplyX11CompositorSettings()
+    {
+        if (_compositor is X11Compositor x11)
+        {
+            x11.IncludeDecorations = _settings.CaptureWindowDecorations;
         }
     }
 
@@ -307,6 +316,7 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
         }
 
         Log.Info($"Compositor: {_compositor.Name}, settings: {_settings.FilePath}");
+        ApplyX11CompositorSettings();
         _settings.Save();
         await ConnectPortalAsync();
 

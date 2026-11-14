@@ -257,6 +257,16 @@ public sealed class CoreSettings
         set => SetBool(nameof(CaptureWindowsInteractive), value);
     }
 
+    /// <summary>
+    /// X11: include window manager decorations (title bar / borders) via <c>_NET_FRAME_EXTENTS</c>.
+    /// Default true (Windows Greenshot-like). Ignored on Wayland compositors that already report framed bounds.
+    /// </summary>
+    public bool CaptureWindowDecorations
+    {
+        get => GetBool(nameof(CaptureWindowDecorations), true);
+        set => SetBool(nameof(CaptureWindowDecorations), value);
+    }
+
     public int CaptureDelay
     {
         get => GetInt(nameof(CaptureDelay), 100);

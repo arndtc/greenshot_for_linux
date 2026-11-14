@@ -280,7 +280,8 @@ The tray menu has *Preferences…*, `greenshot settings` opens them too. They ar
 The settings used so far: `OutputDestinations` (`Picker`, `FileDefault`, `FileWithDialog`, `Clipboard`), `OutputFilePath`,
 `OutputFileFilenamePattern`, `OutputFileFormat` (`png`, `jpg`, `webp`), `OutputFileJpegQuality`, `OutputFileAllowOverwrite`,
 `OutputFileCopyPathToClipboard`, `CaptureMousepointer`, `CaptureDelay`, `PlayCameraSound`, `ShowTrayNotification`,
-the four hotkeys, and the Linux only `CaptureBackend` (`Auto`, `Grim`, `Portal`, `X11`) and `XfceSetShortcuts`.
+the four hotkeys, and the Linux only `CaptureBackend` (`Auto`, `Grim`, `Portal`, `X11`), `XfceSetShortcuts`, and
+`CaptureWindowDecorations` (X11 title bar / borders via `_NET_FRAME_EXTENTS`).
 
 The log is `~/.local/state/greenshot/greenshot.log`; `GREENSHOT_DEBUG=1` adds details.
 

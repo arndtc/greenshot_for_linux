@@ -37,6 +37,11 @@ public sealed class X11Compositor : ICompositor
 
     public bool KnowsWindows => true;
 
+    /// <summary>
+    /// When true (default), expand client bounds with <c>_NET_FRAME_EXTENTS</c> so title bars and borders are included.
+    /// </summary>
+    public bool IncludeDecorations { get; set; } = true;
+
     public Task<ScreenLayout?> GetLayoutAsync() => Task.FromResult(GetLayout());
 
     public Task<WindowInfo?> GetActiveWindowAsync() => Task.FromResult(GetActiveWindow());
@@ -60,7 +65,7 @@ public sealed class X11Compositor : ICompositor
         return new ScreenLayout(screens);
     }
 
-    private static WindowInfo? GetActiveWindow()
+    private WindowInfo? GetActiveWindow()
     {
         using var display = X11Display.TryOpen();
         if (display == null)
@@ -84,7 +89,7 @@ public sealed class X11Compositor : ICompositor
         return null;
     }
 
-    private static List<WindowInfo> GetVisibleWindows()
+    private List<WindowInfo> GetVisibleWindows()
     {
         using var display = X11Display.TryOpen();
         if (display == null)
@@ -158,7 +163,7 @@ public sealed class X11Compositor : ICompositor
         return result;
     }
 
-    private static WindowInfo? DescribeWindow(X11Display display, IntPtr window, bool focused)
+    private WindowInfo? DescribeWindow(X11Display display, IntPtr window, bool focused)
     {
         if (window == IntPtr.Zero || window == display.Root)
         {
@@ -177,10 +182,23 @@ public sealed class X11Compositor : ICompositor
             return null;
         }
 
-        var bounds = new LayoutRect(rootX, rootY, attrs.width, attrs.height);
-        var title = ReadUtf8Property(display, window, "_NET_WM_NAME")
+        var client = new LayoutRect(rootX, rootY, attrs.width, attrs.height);
+        var screen = new LayoutRect(0, 0, display.Width, display.Height);
+        LayoutRect bounds;
+        if (IncludeDecorations && TryReadFrameExtents(display, window, out var left, out var right, out var top, out var bottom))
+        {
+            bounds = ExpandWithFrameExtents(client, left, right, top, bottom, screen);
+        }
+        else
+        {
+            var clipped = client.Intersect(screen);
+            bounds = clipped.IsEmpty ? client : clipped;
+        }
+
+        var title = CaptureTitle.StripEditorWindowSuffix(
+            ReadUtf8Property(display, window, "_NET_WM_NAME")
             ?? ReadLatin1Property(display, window, "WM_NAME")
-            ?? string.Empty;
+            ?? string.Empty);
         var appId = ReadUtf8Property(display, window, "WM_CLASS");
         if (appId != null)
         {
@@ -191,6 +209,52 @@ public sealed class X11Compositor : ICompositor
 
         int pid = (int)ReadCardinal(display, window, "_NET_WM_PID");
         return new WindowInfo(title, appId, bounds, pid, window.ToString("X"), focused);
+    }
+
+    /// <summary>
+    /// Expand client geometry by WM frame extents and clip to the screen (Windows-like framed capture).
+    /// </summary>
+    internal static LayoutRect ExpandWithFrameExtents(LayoutRect client, int left, int right, int top, int bottom, LayoutRect screen)
+    {
+        var expanded = new LayoutRect(
+            client.X - left,
+            client.Y - top,
+            Math.Max(0, client.Width + left + right),
+            Math.Max(0, client.Height + top + bottom));
+        var clipped = expanded.Intersect(screen);
+        return clipped.IsEmpty ? expanded : clipped;
+    }
+
+    private static bool TryReadFrameExtents(X11Display display, IntPtr window, out int left, out int right, out int top, out int bottom)
+    {
+        left = right = top = bottom = 0;
+        var atom = X11Native.XInternAtom(display.Handle, "_NET_FRAME_EXTENTS", onlyIfExists: false);
+        if (X11Native.XGetWindowProperty(display.Handle, window, atom, 0, 4, false, (IntPtr)X11Native.XA_CARDINAL,
+                out _, out var format, out var nItems, out _, out var prop) != X11Native.Success
+            || prop == IntPtr.Zero || nItems < 4 || format != 32)
+        {
+            if (prop != IntPtr.Zero)
+            {
+                X11Native.XFree(prop);
+            }
+
+            return false;
+        }
+
+        try
+        {
+            // format 32: array of longs (8 bytes on LP64)
+            int stride = IntPtr.Size;
+            left = (int)Marshal.ReadIntPtr(prop, 0 * stride).ToInt64();
+            right = (int)Marshal.ReadIntPtr(prop, 1 * stride).ToInt64();
+            top = (int)Marshal.ReadIntPtr(prop, 2 * stride).ToInt64();
+            bottom = (int)Marshal.ReadIntPtr(prop, 3 * stride).ToInt64();
+            return left >= 0 && right >= 0 && top >= 0 && bottom >= 0;
+        }
+        finally
+        {
+            X11Native.XFree(prop);
+        }
     }
 
     private static string? ReadUtf8Property(X11Display display, IntPtr window, string name)
