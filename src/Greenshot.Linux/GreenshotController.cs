@@ -30,6 +30,7 @@ using Greenshot.Linux.Core.Capturing;
 using Greenshot.Linux.Core.Compositor;
 using Greenshot.Linux.Core.Configuration;
 using Greenshot.Linux.Core.DBus;
+using Greenshot.Linux.Core.Hotkeys;
 using Greenshot.Linux.DBus;
 using Greenshot.Linux.Core.Destinations;
 using Greenshot.Linux.Core.Ipc;
@@ -90,6 +91,8 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
     private PortalScreenGrabber? _windowPicker;
     private DesktopNotifications? _notifications;
     private GlobalShortcutsPortal? _shortcuts;
+    private X11GlobalHotkeys? _x11Hotkeys;
+    private bool _xfceShortcutsApplied;
     private ScreenCaptureService? _captureService;
     private InstanceChannel? _channel;
     private IpcDispatcher? _dispatcher;
@@ -121,15 +124,29 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
     public bool HasGlobalShortcuts => _shortcuts != null;
 
     /// <summary>
+    /// X11 <c>XGrabKey</c> and/or XFCE xfconf bindings are active (no GlobalShortcuts portal).
+    /// </summary>
+    public bool HasX11Hotkeys => _x11Hotkeys is { IsActive: true } || _xfceShortcutsApplied;
+
+    /// <summary>
     /// The settings window saved: the language, the theme and the tray menu follow at once
     /// </summary>
     public void ApplySettings()
     {
         Texts.SetLanguage(_settings.Language);
         ApplyTheme();
+        ApplyX11CompositorSettings();
         if (_trayIcon != null)
         {
             _trayIcon.Menu = CreateTrayMenu();
+        }
+    }
+
+    private void ApplyX11CompositorSettings()
+    {
+        if (_compositor is X11Compositor x11)
+        {
+            x11.IncludeDecorations = _settings.CaptureWindowDecorations;
         }
     }
 
@@ -197,10 +214,15 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
                 : new SetupCheck(false, Texts.Linux("setup_clipboard_missing")),
         };
         bool tray = _portal != null && await _portal.NameHasOwnerAsync("org.kde.StatusNotifierWatcher");
-        checks.Add(new SetupCheck(tray, Texts.Linux(tray ? "setup_tray_ok" : "setup_tray_missing")));
+        checks.Add(new SetupCheck(tray, Texts.Linux(tray ? "setup_tray_ok" : SessionEnvironment.IsX11 ? "setup_tray_missing_x11" : "setup_tray_missing")));
         bool notifications = _portal != null && await _portal.NameHasOwnerAsync("org.freedesktop.Notifications");
         checks.Add(new SetupCheck(notifications, Texts.Linux(notifications ? "setup_notifications_ok" : "setup_notifications_missing")));
-        checks.Add(new SetupCheck(HasGlobalShortcuts, Texts.Linux(HasGlobalShortcuts ? "setup_hotkeys_portal" : "setup_hotkeys_manual")));
+        string hotkeysText = HasGlobalShortcuts
+            ? Texts.Linux("setup_hotkeys_portal")
+            : HasX11Hotkeys
+                ? Texts.Linux("setup_hotkeys_x11")
+                : Texts.Linux("setup_hotkeys_manual");
+        checks.Add(new SetupCheck(HasGlobalShortcuts || HasX11Hotkeys, hotkeysText));
 
         var welcome = new WelcomeWindow(checks, ShowSettings);
         welcome.Show();
@@ -294,6 +316,7 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
         }
 
         Log.Info($"Compositor: {_compositor.Name}, settings: {_settings.FilePath}");
+        ApplyX11CompositorSettings();
         _settings.Save();
         await ConnectPortalAsync();
 
@@ -713,11 +736,11 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
     }
 
     /// <summary>
-    /// The recipes changed: the portal gets all hotkeys again, once when several change
+    /// The recipes changed: the portal or X11 grabs get all hotkeys again, once when several change
     /// </summary>
     private void ScheduleRebind() => Dispatcher.UIThread.Post(() =>
     {
-        if (_shortcuts == null)
+        if (_shortcuts == null && _x11Hotkeys == null)
         {
             return;
         }
@@ -1137,43 +1160,113 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
     }
 
     /// <summary>
-    /// Ask the GlobalShortcuts portal for the hotkeys. Where it doesn't exist (e.g. Sway) the user binds "greenshot capture ..."
+    /// Ask the GlobalShortcuts portal for the hotkeys. On X11 without the portal, grab keys with XGrabKey and/or
+    /// set XFCE xfconf bindings. Elsewhere (e.g. Sway) the user binds "greenshot capture ..." in the compositor.
     /// </summary>
     private async Task RegisterShortcutsAsync()
     {
-        if (_portal == null || !await GlobalShortcutsPortal.IsAvailableAsync(_portal))
+        if (_portal != null && await GlobalShortcutsPortal.IsAvailableAsync(_portal))
         {
-            Log.Info("The desktop has no GlobalShortcuts portal, bind \"greenshot capture region\" etc. to keys in the compositor");
+            try
+            {
+                _shortcuts = new GlobalShortcutsPortal(_portal);
+                _shortcuts.Activated += OnShortcutActivated;
+                await BindShortcutsAsync();
+                return;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Registering the global shortcuts portal failed", ex);
+            }
+        }
+
+        if (SessionEnvironment.IsX11)
+        {
+            await RegisterX11ShortcutsAsync();
             return;
         }
 
+        Log.Info("The desktop has no GlobalShortcuts portal, bind \"greenshot capture region\" etc. to keys in the compositor");
+    }
+
+    private void OnShortcutActivated(string id) => Dispatcher.UIThread.Post(() =>
+    {
+        CaptureMode? mode = id switch
+        {
+            ShortcutRegion => CaptureMode.Region,
+            ShortcutWindow => _compositor.KnowsWindows && !_settings.CaptureWindowsInteractive ? CaptureMode.ActiveWindow : CaptureMode.Window,
+            ShortcutFullscreen => CaptureMode.FullScreen,
+            ShortcutLastRegion => CaptureMode.LastRegion,
+            _ => null,
+        };
+        if (mode != null)
+        {
+            _ = CaptureAsync(mode.Value);
+        }
+        else if (_recipeHotkeys.TryGetValue(id, out var recipe))
+        {
+            recipe.Pressed();
+        }
+    });
+
+    private async Task RegisterX11ShortcutsAsync()
+    {
+        // XFCE (or any desktop using xfce4-keyboard-shortcuts): detect Print conflicts even if
+        // XDG_CURRENT_DESKTOP is unset (common under Xvfb test harnesses).
+        if (XfceKeyboardShortcuts.IsAvailable)
+        {
+            var conflicts = await XfceKeyboardShortcuts.DetectConflictsAsync();
+            if (conflicts.Count > 0)
+            {
+                Log.Warn($"XFCE has {conflicts.Count} Print-family shortcut conflict(s) with Greenshot");
+            }
+
+            bool touchXfce = SessionEnvironment.IsXfce || conflicts.Count > 0
+                || XfceKeyboardShortcuts.ShouldApplyFromEnvironmentOrSettings(_settings.XfceSetShortcuts);
+            if (touchXfce && XfceKeyboardShortcuts.ShouldApplyFromEnvironmentOrSettings(_settings.XfceSetShortcuts))
+            {
+                int set = await XfceKeyboardShortcuts.ApplyGreenshotBindingsAsync();
+                _xfceShortcutsApplied = set > 0;
+                if (_xfceShortcutsApplied)
+                {
+                    Log.Info($"XFCE xfconf shortcuts assigned for {set} Print-family key(s); greenshot capture … will run on those keys");
+                }
+            }
+            else if (conflicts.Count > 0)
+            {
+                Log.Info("To let Greenshot claim XFCE Print keys, set XfceSetShortcuts=True in greenshot.ini or GREENSHOT_XFCE_SET_SHORTCUTS=1");
+            }
+            else if (SessionEnvironment.IsXfce || conflicts.Count == 0)
+            {
+                // Already greenshot or empty — treat as managed when any desired key is greenshot
+                int greenshotOwned = 0;
+                foreach (var (key, _, _) in XfceKeyboardShortcuts.DefaultBindings)
+                {
+                    if (XfceKeyboardShortcuts.IsGreenshotCommand(await XfceKeyboardShortcuts.GetCommandAsync(key)))
+                    {
+                        greenshotOwned++;
+                    }
+                }
+
+                _xfceShortcutsApplied = greenshotOwned > 0;
+            }
+        }
+
+        // XGrabKey for in-process activation (also covers non-XFCE X11). May fail when XFCE still owns the keys.
         try
         {
-            _shortcuts = new GlobalShortcutsPortal(_portal);
-            _shortcuts.Activated += id => Dispatcher.UIThread.Post(() =>
-            {
-                CaptureMode? mode = id switch
-                {
-                    ShortcutRegion => CaptureMode.Region,
-                    ShortcutWindow => _compositor.KnowsWindows && !_settings.CaptureWindowsInteractive ? CaptureMode.ActiveWindow : CaptureMode.Window,
-                    ShortcutFullscreen => CaptureMode.FullScreen,
-                    ShortcutLastRegion => CaptureMode.LastRegion,
-                    _ => null,
-                };
-                if (mode != null)
-                {
-                    _ = CaptureAsync(mode.Value);
-                }
-                else if (_recipeHotkeys.TryGetValue(id, out var recipe))
-                {
-                    recipe.Pressed();
-                }
-            });
+            _x11Hotkeys = new X11GlobalHotkeys();
+            _x11Hotkeys.Activated += OnShortcutActivated;
             await BindShortcutsAsync();
         }
         catch (Exception ex)
         {
-            Log.Warn("Registering the global shortcuts failed", ex);
+            Log.Warn("Registering X11 global hotkeys failed", ex);
+        }
+
+        if (!HasX11Hotkeys)
+        {
+            Log.Info("X11 hotkeys are not active; bind \"greenshot capture region\" etc. in the desktop keyboard settings");
         }
     }
 
@@ -1182,28 +1275,56 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
     /// </summary>
     private async Task BindShortcutsAsync()
     {
-        if (_shortcuts == null)
+        if (_shortcuts != null)
+        {
+            try
+            {
+                var requests = new List<ShortcutRequest>
+                {
+                    new(ShortcutRegion, "Capture region", GlobalShortcutsPortal.ToXdgTrigger(_settings.RegionHotkey)),
+                    new(ShortcutWindow, "Capture window", GlobalShortcutsPortal.ToXdgTrigger(_settings.WindowHotkey)),
+                    new(ShortcutFullscreen, "Capture full screen", GlobalShortcutsPortal.ToXdgTrigger(_settings.FullscreenHotkey)),
+                    new(ShortcutLastRegion, "Capture last region", GlobalShortcutsPortal.ToXdgTrigger(_settings.LastregionHotkey)),
+                };
+                requests.AddRange(_recipeHotkeys.Select(h => new ShortcutRequest(h.Key, h.Value.Description, GlobalShortcutsPortal.ToXdgTrigger(h.Value.Hotkey))));
+                var assigned = await _shortcuts.BindAsync(requests);
+                Log.Info("Global shortcuts: " + string.Join(", ", assigned.Select(a => $"{a.Key}={a.Value}")));
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Binding the global shortcuts failed", ex);
+            }
+
+            return;
+        }
+
+        if (_x11Hotkeys == null)
         {
             return;
         }
 
         try
         {
-            var requests = new List<ShortcutRequest>
+            var hotkeys = new List<(string Id, string Hotkey)>
             {
-                new(ShortcutRegion, "Capture region", GlobalShortcutsPortal.ToXdgTrigger(_settings.RegionHotkey)),
-                new(ShortcutWindow, "Capture window", GlobalShortcutsPortal.ToXdgTrigger(_settings.WindowHotkey)),
-                new(ShortcutFullscreen, "Capture full screen", GlobalShortcutsPortal.ToXdgTrigger(_settings.FullscreenHotkey)),
-                new(ShortcutLastRegion, "Capture last region", GlobalShortcutsPortal.ToXdgTrigger(_settings.LastregionHotkey)),
+                (ShortcutRegion, _settings.RegionHotkey),
+                (ShortcutWindow, _settings.WindowHotkey),
+                (ShortcutFullscreen, _settings.FullscreenHotkey),
+                (ShortcutLastRegion, _settings.LastregionHotkey),
             };
-            requests.AddRange(_recipeHotkeys.Select(h => new ShortcutRequest(h.Key, h.Value.Description, GlobalShortcutsPortal.ToXdgTrigger(h.Value.Hotkey))));
-            var assigned = await _shortcuts.BindAsync(requests);
-            Log.Info("Global shortcuts: " + string.Join(", ", assigned.Select(a => $"{a.Key}={a.Value}")));
+            hotkeys.AddRange(_recipeHotkeys.Select(h => (h.Key, h.Value.Hotkey)));
+            var bound = _x11Hotkeys.Bind(hotkeys);
+            if (bound.Count > 0)
+            {
+                Log.Info("X11 global hotkeys: " + string.Join(", ", bound));
+            }
         }
         catch (Exception ex)
         {
-            Log.Warn("Binding the global shortcuts failed", ex);
+            Log.Warn("Binding X11 global hotkeys failed", ex);
         }
+
+        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -1242,6 +1363,7 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
     public void Dispose()
     {
         _trayIcon?.Dispose();
+        _x11Hotkeys?.Dispose();
         _shortcuts?.Dispose();
         _notifications?.Dispose();
         _portal?.Dispose();

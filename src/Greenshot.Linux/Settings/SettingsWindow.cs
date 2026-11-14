@@ -48,6 +48,11 @@ internal interface ISettingsHost : IEditorHost
     /// </summary>
     bool HasGlobalShortcuts { get; }
 
+    /// <summary>
+    /// Are X11 / XFCE hotkeys active (XGrabKey or xfconf)?
+    /// </summary>
+    bool HasX11Hotkeys { get; }
+
     IReadOnlyList<Core.Plugins.IGreenshotPlugin> Plugins { get; }
 
     Core.Plugins.PluginPolicy Policy { get; }
@@ -207,7 +212,7 @@ internal sealed class SettingsWindow : Window
     }
 
     /// <summary>
-    /// Wayland applications can't grab keys: either the desktop manages them (portal) or the user binds the commands
+    /// Wayland: portal or compositor bindings. X11: XGrabKey / XFCE xfconf, or manual bindings.
     /// </summary>
     private Control HotkeySection()
     {
@@ -228,6 +233,11 @@ internal sealed class SettingsWindow : Window
         if (_host.HasGlobalShortcuts)
         {
             return Ui.Section(Texts.Core("hotkeys"), Ui.Note(Texts.Linux("hotkeys_portal")), list);
+        }
+
+        if (_host.HasX11Hotkeys)
+        {
+            return Ui.Section(Texts.Core("hotkeys"), Ui.Note(Texts.Linux("hotkeys_x11")), list);
         }
 
         var lines = string.Join('\n', hotkeys.Select(h => $"bindsym {SwayKey(h.Hotkey)} exec greenshot {h.Command}"));
@@ -292,11 +302,19 @@ internal sealed class SettingsWindow : Window
         _apply.Add(() => _settings.ZxingScanOnCapture = scanQr.IsChecked == true);
         var interactive = Ui.Check(Texts.Settings("capture_windows_interactive"), _settings.CaptureWindowsInteractive);
         _apply.Add(() => _settings.CaptureWindowsInteractive = interactive.IsChecked == true);
+        var decorations = Ui.Check(Texts.Linux("capture_window_decorations"), _settings.CaptureWindowDecorations);
+        _apply.Add(() => _settings.CaptureWindowDecorations = decorations.IsChecked == true);
 
-        string[] backends = ["Auto", "Grim", "Portal"];
+        string[] backends = ["Auto", "Grim", "Portal", "X11"];
         var backend = new ComboBox
         {
-            ItemsSource = new[] { Texts.Linux("capture_backend_auto"), Texts.Linux("capture_backend_grim"), Texts.Linux("capture_backend_portal") },
+            ItemsSource = new[]
+            {
+                Texts.Linux("capture_backend_auto"),
+                Texts.Linux("capture_backend_grim"),
+                Texts.Linux("capture_backend_portal"),
+                Texts.Linux("capture_backend_x11"),
+            },
             SelectedIndex = Math.Max(0, Array.FindIndex(backends, b => b.Equals(_settings.CaptureBackend, StringComparison.OrdinalIgnoreCase))),
         };
         _apply.Add(() => _settings.CaptureBackend = backends[Math.Max(0, backend.SelectedIndex)]);
@@ -313,7 +331,7 @@ internal sealed class SettingsWindow : Window
                 zoomer,
                 scanQr,
                 Ui.Row(Texts.Settings("waittime"), delay)),
-            Ui.Section(Texts.Settings("windowscapture"), interactive),
+            Ui.Section(Texts.Settings("windowscapture"), interactive, decorations, Ui.Note(Texts.Linux("capture_window_decorations_hint"))),
             Ui.Section(Texts.Linux("capture_backend"), backend, Ui.Note(Texts.Linux("capture_backend_restart"))),
             Ui.Section(Texts.Settings("ocr"), Ui.Row(Texts.Linux("ocr_languages"), ocrLanguages), installed));
     }

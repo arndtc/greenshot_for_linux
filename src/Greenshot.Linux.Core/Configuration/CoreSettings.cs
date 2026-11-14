@@ -257,6 +257,16 @@ public sealed class CoreSettings
         set => SetBool(nameof(CaptureWindowsInteractive), value);
     }
 
+    /// <summary>
+    /// X11: include window manager decorations (title bar / borders) via <c>_NET_FRAME_EXTENTS</c>.
+    /// Default true (Windows Greenshot-like). Ignored on Wayland compositors that already report framed bounds.
+    /// </summary>
+    public bool CaptureWindowDecorations
+    {
+        get => GetBool(nameof(CaptureWindowDecorations), true);
+        set => SetBool(nameof(CaptureWindowDecorations), value);
+    }
+
     public int CaptureDelay
     {
         get => GetInt(nameof(CaptureDelay), 100);
@@ -412,12 +422,22 @@ public sealed class CoreSettings
     }
 
     /// <summary>
-    /// Linux only: which screen grabber to use, Auto, Grim or Portal
+    /// Linux only: which screen grabber to use, Auto, Grim, Portal or X11
     /// </summary>
     public string CaptureBackend
     {
         get => GetString(nameof(CaptureBackend), "Auto");
         set => SetString(nameof(CaptureBackend), value);
+    }
+
+    /// <summary>
+    /// Linux / XFCE: when true (or GREENSHOT_XFCE_SET_SHORTCUTS=1), claim Print-family keys in
+    /// xfce4-keyboard-shortcuts for <c>greenshot capture …</c> (overrides xfce4-screenshooter when it owns them).
+    /// </summary>
+    public bool XfceSetShortcuts
+    {
+        get => GetBool(nameof(XfceSetShortcuts), false);
+        set => SetBool(nameof(XfceSetShortcuts), value);
     }
 
     public bool ZoomerEnabled

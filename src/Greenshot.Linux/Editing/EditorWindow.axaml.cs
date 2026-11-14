@@ -544,7 +544,9 @@ public partial class EditorWindow : Window
 
     private void UpdateTitle()
     {
-        Title = $"{(_tab.Surface.IsModified ? "*" : string.Empty)}{_tab.Title} - {Texts.Editor("title")}";
+        // Avoid "… - Greenshot image editor - Greenshot image editor" when the tab title already came from an editor window
+        var baseTitle = CaptureTitle.StripEditorWindowSuffix(_tab.Title);
+        Title = $"{(_tab.Surface.IsModified ? "*" : string.Empty)}{baseTitle} - {Texts.Editor("title")}";
         UpdateTabStrip();
     }
 

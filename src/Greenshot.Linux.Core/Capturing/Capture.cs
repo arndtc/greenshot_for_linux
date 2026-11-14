@@ -55,9 +55,18 @@ public enum CaptureMode
 /// </summary>
 public sealed class CaptureDetails
 {
+    private string? _title;
+
     public DateTime DateTime { get; init; } = DateTime.Now;
 
-    public string? Title { get; set; }
+    /// <summary>
+    /// Window / capture title for ${title}; editor window suffixes are stripped so filenames stay clean.
+    /// </summary>
+    public string? Title
+    {
+        get => _title;
+        set => _title = value == null ? null : CaptureTitle.StripEditorWindowSuffix(value);
+    }
 
     public CaptureMode Mode { get; init; }
 

@@ -69,6 +69,12 @@ public static class CompositorDetector
             return new HyprlandCompositor();
         }
 
+        // X11 (XFCE, etc.): windows and layout from the root window; skip on Wayland even with XWayland
+        if (SessionEnvironment.IsX11 && X11.X11Display.IsAvailable)
+        {
+            return new X11Compositor();
+        }
+
         return new GenericCompositor(Environment.GetEnvironmentVariable("XDG_CURRENT_DESKTOP") ?? "unknown");
     }
 }
