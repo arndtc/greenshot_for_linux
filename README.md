@@ -155,8 +155,15 @@ dotnet run --project src/Greenshot.Linux -- capture region
 dotnet test
 ```
 
+`dotnet run` / `dotnet greenshot.dll` alone is enough to try the tray and editor, but **not** for host portal
+`Registry.Register` or GlobalShortcuts: those need a desktop file whose `Exec=` resolves to an existing absolute
+binary. Prefer `packaging/install.sh`, or let a first Register failure write one under
+`~/.local/share/applications/` and retry. Without that, GNOME may log “App info not found” /
+“An app id is required”.
+
 `packaging/install.sh` publishes a release build to `~/.local/lib/greenshot`, links `~/.local/bin/greenshot`
-and adds the menu entry and icons. `install.sh --autostart` also starts Greenshot with the session.
+and adds the menu entry and icons (with a full-path `Exec=`). `install.sh --autostart` also starts Greenshot with
+the session.
 
 ## Packages
 

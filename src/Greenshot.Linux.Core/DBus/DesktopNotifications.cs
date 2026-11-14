@@ -96,11 +96,63 @@ public sealed class DesktopNotifications : IDisposable
                 _actions[id] = onClick;
             }
         }
+        catch (Exception ex) when (IsMissingNotificationsDaemon(ex))
+        {
+            // No org.freedesktop.Notifications: try the desktop portal (available with xdg-desktop-portal-gtk etc.)
+            try
+            {
+                await ShowViaPortalAsync(summary, body, severity, imagePath).ConfigureAwait(false);
+            }
+            catch (Exception portalEx)
+            {
+                Log.Warn($"Could not show the notification \"{summary}\": {ex.Message}; portal fallback: {portalEx.Message}");
+            }
+        }
         catch (Exception ex)
         {
             // Without a notification daemon there are no notifications, that is not an error of the capture
             Log.Warn($"Could not show the notification \"{summary}\": {ex.Message}");
         }
+    }
+
+    private static bool IsMissingNotificationsDaemon(Exception ex) =>
+        ex.Message.Contains("org.freedesktop.Notifications", StringComparison.Ordinal)
+        && (ex.Message.Contains("ServiceUnknown", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("NameHasNoOwner", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("was not provided by any .service files", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// org.freedesktop.portal.Notification.AddNotification — no click actions (portal default-action needs a separate handler).
+    /// </summary>
+    private async Task ShowViaPortalAsync(string summary, string body, NotificationSeverity severity, string? imagePath)
+    {
+        var writer = _connection.GetMessageWriter();
+        MessageBuffer message;
+        try
+        {
+            writer.WriteMethodCallHeader(destination: DesktopPortal.BusName, path: DesktopPortal.ObjectPath,
+                @interface: "org.freedesktop.portal.Notification", member: "AddNotification", signature: "ssa{sv}");
+            writer.WriteString(AppIdentity.Id);
+            writer.WriteString("greenshot-" + Guid.NewGuid().ToString("N")[..12]);
+            // Portal icon is a nested variant; skip file thumbnails here (title/body still show).
+            _ = imagePath;
+            var notification = new Dictionary<string, object>
+            {
+                ["title"] = summary,
+                ["body"] = body,
+                ["priority"] = severity == NotificationSeverity.Error ? "urgent" : severity == NotificationSeverity.Warning ? "high" : "normal",
+            };
+
+            writer.WriteOptions(notification);
+            message = writer.CreateMessage();
+        }
+        finally
+        {
+            writer.Dispose();
+        }
+
+        await _connection.CallMethodAsync(message).ConfigureAwait(false);
+        Log.Debug($"Showed notification \"{summary}\" via org.freedesktop.portal.Notification");
     }
 
     private MessageBuffer CreateNotify(string summary, string body, NotificationSeverity severity, string? imagePath, bool clickable)

@@ -137,6 +137,38 @@ public sealed class LinuxCommandLineTests : IDisposable
         Assert.Empty(app.Calls);
     }
 
+    [Fact]
+    public async Task Capture_when_impossible_exits_nonzero_with_stderr()
+    {
+        var app = new FakeIpcApp { CaptureUnavailableMessage = ScreenCaptureService.UnavailableMessage };
+        using var stream = new MemoryStream();
+        var context = new IpcRequestContext(IpcEnvelope.CreateCli(["capture", "fullscreen"], IpcSources.Cli, "/tmp"), stream, IpcPeer.Unknown, true);
+        await new IpcDispatcher(app).HandleAsync(context);
+        Assert.Empty(app.Calls);
+
+        stream.Position = 0;
+        var frames = new List<(char Type, string Text, int ExitCode)>();
+        while (stream.Position < stream.Length)
+        {
+            var lengthBytes = new byte[4];
+            Assert.Equal(4, stream.Read(lengthBytes));
+            int length = BitConverter.ToInt32(lengthBytes);
+            var frame = new byte[length];
+            Assert.Equal(length, stream.Read(frame));
+            if (frame[0] == 'X')
+            {
+                frames.Add(('X', null, BitConverter.ToInt32(frame, 1)));
+            }
+            else
+            {
+                frames.Add(((char)frame[0], System.Text.Encoding.UTF8.GetString(frame, 1, frame.Length - 1), 0));
+            }
+        }
+
+        Assert.Contains(frames, f => f.Type == 'E' && f.Text.Contains("can't capture", StringComparison.Ordinal));
+        Assert.Equal(1, frames.Last().ExitCode);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_folder))
