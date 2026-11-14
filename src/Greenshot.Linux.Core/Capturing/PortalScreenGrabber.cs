@@ -29,7 +29,7 @@ namespace Greenshot.Linux.Core.Capturing;
 /// Captures with the Screenshot portal, which every desktop offers (GNOME, KDE, wlroots, ...).
 /// The portal writes a file and returns its URI; GNOME and KDE ask the user once for permission.
 /// </summary>
-public sealed class PortalScreenGrabber(DesktopPortal portal) : IScreenGrabber
+public sealed class PortalScreenGrabber(DesktopPortal portal, IPortalParentProvider? parentProvider = null) : IScreenGrabber
 {
     private const string ScreenshotInterface = "org.freedesktop.portal.Screenshot";
 
@@ -52,10 +52,16 @@ public sealed class PortalScreenGrabber(DesktopPortal portal) : IScreenGrabber
 
     private async Task<SKBitmap> RequestAsync(bool interactive, CancellationToken cancellationToken)
     {
+        // GNOME: without a focused app window the access dialog is refused (portal code 2)
+        await using var parent = parentProvider != null
+            ? await parentProvider.BeginAsync(cancellationToken).ConfigureAwait(false)
+            : null;
+        var parentWindow = parent?.ParentWindow ?? string.Empty;
+
         var requestedAt = DateTime.UtcNow;
         var response = await portal.RequestAsync(ScreenshotInterface, "Screenshot", "sa{sv}", (ref MessageWriter writer, string token) =>
         {
-            writer.WriteString(string.Empty);
+            writer.WriteString(parentWindow);
             writer.WriteOptions(new Dictionary<string, object>
             {
                 ["handle_token"] = token,
@@ -72,6 +78,13 @@ public sealed class PortalScreenGrabber(DesktopPortal portal) : IScreenGrabber
 
         if (!response.IsSuccess || !response.Results.TryGetValue("uri", out var uriValue))
         {
+            if (response.Code == 2)
+            {
+                throw new CaptureException(
+                    "The screenshot portal refused the request (code 2). On GNOME, allow screen capture for Greenshot when the " +
+                    "system asks, ideally while a Greenshot window is focused (tray and hotkeys open a short-lived one).");
+            }
+
             throw new CaptureException($"The screenshot portal failed with code {response.Code}");
         }
 

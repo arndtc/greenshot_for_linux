@@ -30,6 +30,7 @@ using Greenshot.Linux.Core.Capturing;
 using Greenshot.Linux.Core.Compositor;
 using Greenshot.Linux.Core.Configuration;
 using Greenshot.Linux.Core.DBus;
+using Greenshot.Linux.DBus;
 using Greenshot.Linux.Core.Destinations;
 using Greenshot.Linux.Core.Ipc;
 using Greenshot.Linux.Core.Output;
@@ -296,9 +297,11 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
         _settings.Save();
         await ConnectPortalAsync();
 
+        // GNOME needs a focused window before the Screenshot access dialog (tray / hotkey have none otherwise)
+        var portalParent = new AvaloniaPortalParentProvider();
         try
         {
-            var grabber = await ScreenCaptureService.CreateGrabberAsync(_settings, _portal);
+            var grabber = await ScreenCaptureService.CreateGrabberAsync(_settings, _portal, portalParent);
             _captureService = new ScreenCaptureService(_settings, _compositor, grabber, GetPlatformLayout);
             Log.Info($"Capturing with {grabber.Name}");
         }
@@ -310,7 +313,9 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
 
         _fileChooser = _portal != null && await FileChooserPortal.IsAvailableAsync(_portal) ? new FileChooserPortal(_portal) : null;
         // GNOME, KDE: the windows are picked in the desktop's own screenshot dialog
-        _windowPicker = !_compositor.KnowsWindows && _portal != null && await PortalScreenGrabber.IsAvailableAsync(_portal) ? new PortalScreenGrabber(_portal) : null;
+        _windowPicker = !_compositor.KnowsWindows && _portal != null && await PortalScreenGrabber.IsAvailableAsync(_portal)
+            ? new PortalScreenGrabber(_portal, portalParent)
+            : null;
         var saveDialog = new SaveDialog(_fileChooser);
         _destinations.Add(new EditorDestination(OpenEditor));
         _destinations.Add(new FileDestination(_settings, saveDialog.AskAsync));

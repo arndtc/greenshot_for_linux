@@ -40,11 +40,12 @@ public sealed class ScreenCaptureService(CoreSettings settings, ICompositor comp
     /// <summary>
     /// Pick the grabber for CaptureBackend: Grim, Portal or Auto (grim when it works, else the portal)
     /// </summary>
-    public static async Task<IScreenGrabber> CreateGrabberAsync(CoreSettings settings, DesktopPortal? portal)
+    public static async Task<IScreenGrabber> CreateGrabberAsync(CoreSettings settings, DesktopPortal? portal,
+        IPortalParentProvider? portalParent = null)
     {
         var configured = settings.CaptureBackend.Trim().ToLowerInvariant();
         IScreenGrabber? portalGrabber = portal != null && await PortalScreenGrabber.IsAvailableAsync(portal).ConfigureAwait(false)
-            ? new PortalScreenGrabber(portal)
+            ? new PortalScreenGrabber(portal, portalParent)
             : null;
         IScreenGrabber? grimGrabber = GrimScreenGrabber.IsAvailable ? new GrimScreenGrabber() : null;
 
