@@ -58,9 +58,14 @@ public sealed class ScreenCaptureService(CoreSettings settings, ICompositor comp
                 : grimGrabber ?? portalGrabber,
         };
 
-        return chosen ?? throw new CaptureException(
-            "Greenshot can't capture the screen: install grim (wlroots compositors) or xdg-desktop-portal with a backend for your desktop");
+        return chosen ?? throw new CaptureException(UnavailableMessage);
     }
+
+    /// <summary>
+    /// Message when neither grim nor a Screenshot portal backend is available (CLI stderr / notifications).
+    /// </summary>
+    public const string UnavailableMessage =
+        "Greenshot can't capture the screen: install grim (wlroots compositors) or xdg-desktop-portal with a backend for your desktop";
 
     public async Task<ScreenLayout> GetLayoutAsync() => await compositor.GetLayoutAsync().ConfigureAwait(false) ?? uiLayout();
 

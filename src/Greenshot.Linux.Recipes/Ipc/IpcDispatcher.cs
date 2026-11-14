@@ -42,6 +42,11 @@ public interface IIpcApp
     /// </summary>
     void Run(AppCommand command);
 
+    /// <summary>
+    /// When capture is impossible, the message for the CLI (stderr); null when a grabber is available.
+    /// </summary>
+    string? CaptureUnavailableMessage { get; }
+
     Task ShowSettingsAsync();
 
     Task ShowAboutAsync();
@@ -185,6 +190,13 @@ public sealed class IpcDispatcher(IIpcApp app)
         if (command == null)
         {
             await RecipeCommands.ErrorAsync(context, $"Unknown command '{context.Envelope.RawInput}'.", CliCommandParser.UsageExitCode);
+            return;
+        }
+
+        // Capture with no grabber: fail on the CLI so scripts and compositor bindings see it
+        if (command.Kind == AppCommandKind.Capture && app.CaptureUnavailableMessage is { } captureError)
+        {
+            await RecipeCommands.ErrorAsync(context, captureError);
             return;
         }
 

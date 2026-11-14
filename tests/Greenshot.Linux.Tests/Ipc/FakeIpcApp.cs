@@ -37,6 +37,8 @@ internal sealed class FakeIpcApp : IIpcApp
 
     public void Run(AppCommand command) => Calls.Add("run " + command.ToWire());
 
+    public string? CaptureUnavailableMessage { get; set; }
+
     public Task ShowSettingsAsync() => Record("settings");
 
     public Task ShowAboutAsync() => Record("about");

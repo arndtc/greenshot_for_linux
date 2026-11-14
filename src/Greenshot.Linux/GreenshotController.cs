@@ -437,6 +437,9 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
 
         public string Version => Program.Version;
 
+        public string? CaptureUnavailableMessage =>
+            controller._captureService == null ? ScreenCaptureService.UnavailableMessage : null;
+
         public void Run(AppCommand command) => Dispatcher.UIThread.Post(async () =>
         {
             try
@@ -482,7 +485,8 @@ internal sealed class GreenshotController : ISettingsHost, IHotkeyService, IDisp
     {
         if (_captureService == null)
         {
-            return NotifyAsync("Greenshot can't capture", "No way to capture the screen was found, see the log.", NotificationSeverity.Error);
+            Console.Error.WriteLine(ScreenCaptureService.UnavailableMessage);
+            return NotifyAsync("Greenshot can't capture", ScreenCaptureService.UnavailableMessage, NotificationSeverity.Error);
         }
 
         string recipeId = mode switch

@@ -78,6 +78,8 @@ public sealed class DesktopPortal : IDisposable
     /// (xdg-desktop-portal ≥ 1.20). Host apps must do this before any other portal call; from 1.21 GlobalShortcuts
     /// rejects CreateSession with NotAllowed "An app id is required" otherwise. Sandboxed apps (Flatpak/Snap) already
     /// have an id and skip. Missing Registry on older portals is ignored.
+    /// When Register fails with "App info not found", installs a user desktop file whose Exec= is the running process
+    /// and retries once (needed for bare <c>dotnet greenshot.dll</c> without packaging/install.sh).
     /// </summary>
     public async Task RegisterHostAppAsync(string appId)
     {
@@ -86,6 +88,47 @@ public sealed class DesktopPortal : IDisposable
             return;
         }
 
+        try
+        {
+            await CallRegisterAsync(appId).ConfigureAwait(false);
+            Log.Info($"Registered host app id '{appId}' with the desktop portal");
+        }
+        catch (DBusExceptionBase ex) when (IsMissingRegistry(ex))
+        {
+            Log.Debug($"Host portal Registry is not available: {ex.Message}");
+        }
+        catch (DBusExceptionBase ex) when (IsAppInfoNotFound(ex))
+        {
+            var desktopPath = await HostAppDesktopFile.EnsureForRunningProcessAsync().ConfigureAwait(false);
+            if (desktopPath == null)
+            {
+                Log.Warn($"Registering host app id '{appId}' failed (app info not found) and no resolvable Exec could be built. {HostAppDesktopFile.InstallHint}");
+                return;
+            }
+
+            Log.Info($"Wrote {desktopPath} with Exec for this process so the host portal can find '{appId}', retrying Register");
+            // One immediate retry, then one more after a short wait (desktop-file cache)
+            if (await TryRegisterAfterDesktopInstallAsync(appId).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            await Task.Delay(700).ConfigureAwait(false);
+            if (await TryRegisterAfterDesktopInstallAsync(appId).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            Log.Warn($"Registering host app id '{appId}' still failed after writing {desktopPath}. {HostAppDesktopFile.InstallHint}");
+        }
+        catch (DBusExceptionBase ex)
+        {
+            Log.Warn($"Registering host app id '{appId}' with the desktop portal failed: {ex.Message}", ex);
+        }
+    }
+
+    private async Task CallRegisterAsync(string appId)
+    {
         // MessageWriter is a ref struct: same pattern as CreateCall (no using var — WriteOptions needs ref)
         var writer = Connection.GetMessageWriter();
         MessageBuffer message;
@@ -102,20 +145,30 @@ public sealed class DesktopPortal : IDisposable
             writer.Dispose();
         }
 
+        await Connection.CallMethodAsync(message).ConfigureAwait(false);
+    }
+
+    private async Task<bool> TryRegisterAfterDesktopInstallAsync(string appId)
+    {
         try
         {
-            await Connection.CallMethodAsync(message).ConfigureAwait(false);
+            await CallRegisterAsync(appId).ConfigureAwait(false);
             Log.Info($"Registered host app id '{appId}' with the desktop portal");
+            return true;
         }
         catch (DBusExceptionBase ex) when (IsMissingRegistry(ex))
         {
             Log.Debug($"Host portal Registry is not available: {ex.Message}");
+            return true; // nothing more to do
         }
-        catch (DBusExceptionBase ex)
+        catch (DBusExceptionBase)
         {
-            Log.Warn($"Registering host app id '{appId}' with the desktop portal failed: {ex.Message}", ex);
+            return false;
         }
     }
+
+    private static bool IsAppInfoNotFound(DBusExceptionBase ex) =>
+        ex.Message.Contains("App info not found", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Flatpak and Snap set the portal app id; Registry.Register is for unsandboxed host apps only.
